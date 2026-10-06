@@ -218,9 +218,14 @@
       
       <!-- لوحة تحكم الأدمن (تظهر للأدمن حصراً) -->
       <div id="admin-panel-container" class="glass-card p-4 rounded-2xl space-y-4 border-2 border-rose-500/30 bg-rose-500/5 hidden">
-        <h3 class="text-sm font-bold text-rose-400 flex items-center gap-2 border-b border-rose-500/20 pb-2">
-          <i class="fa-solid fa-shield-halved"></i> لوحة تحكم الإدارة (الطلبات المعلقة)
-        </h3>
+        <div class="flex justify-between items-center border-b border-rose-500/20 pb-2">
+          <h3 class="text-sm font-bold text-rose-400 flex items-center gap-2">
+            <i class="fa-solid fa-shield-halved"></i> لوحة تحكم الإدارة (الطلبات المعلقة)
+          </h3>
+          <button onclick="manualRefreshAdmin()" class="text-[10px] bg-rose-500/20 text-rose-300 px-2.5 py-1 rounded-lg hover:bg-rose-500/30">
+            <i class="fa-solid fa-rotate"></i> تحديث يدوي
+          </button>
+        </div>
         
         <div>
           <h4 class="text-xs font-bold text-emerald-400 mb-2"><i class="fa-solid fa-wallet ml-1"></i> طلبات الإيداع الاستثماري</h4>
@@ -358,6 +363,9 @@
     // تحديد بريد الأدمن الحصري
     const ADMIN_EMAIL = 'nnnnaaatttnanooo@gmail.com';
 
+    // قناة اتصال فورية بين النوافذ والعلامات (BroadcastChannel) لتحديث الأدمن لحظياً
+    const apexChannel = new BroadcastChannel('apex_realtime_channel');
+
     const depositWallets = {
       'TRC20': 'TXApexCapitalOfficialWallet789',
       'BEP20': '0xApexCapitalSmartChain982'
@@ -409,36 +417,51 @@
       localStorage.setItem(`apex_tx_${currentUserEmail}`, JSON.stringify(transactions));
       localStorage.setItem('apex_global_pending_deposits', JSON.stringify(pendingDeposits));
       localStorage.setItem('apex_global_pending_withdrawals', JSON.stringify(pendingWithdrawals));
+
+      // إرسال رسالة فورية لكل النوافذ المفتوحة
+      apexChannel.postMessage({ type: 'UPDATE_DATA' });
     }
 
-    // الاستماع الفوري والتلقائي للتغيرات في التخزين لتحديث لوحة الأدمن بشكل لحظي
-    window.addEventListener('storage', (e) => {
-      if (e.key === 'apex_global_pending_deposits' || e.key === 'apex_global_pending_withdrawals') {
-        const savedDep = localStorage.getItem('apex_global_pending_deposits');
-        pendingDeposits = savedDep ? JSON.parse(savedDep) : [];
-        const savedWth = localStorage.getItem('apex_global_pending_withdrawals');
-        pendingWithdrawals = savedWth ? JSON.parse(savedWth) : [];
-
-        if (currentUserEmail === ADMIN_EMAIL) {
-          renderAdminPendingList();
-          renderAdminPendingWithdrawalsList();
-        }
+    // استقبال رسائل التحديث الفوري من القناة أو التخزين
+    apexChannel.onmessage = (event) => {
+      if (event.data && event.data.type === 'UPDATE_DATA') {
+        syncAndRefresh();
       }
-      if (currentUserEmail && e.key === `apex_balance_${currentUserEmail}`) {
+    };
+
+    window.addEventListener('storage', (e) => {
+      syncAndRefresh();
+    });
+
+    function syncAndRefresh() {
+      const savedDep = localStorage.getItem('apex_global_pending_deposits');
+      pendingDeposits = savedDep ? JSON.parse(savedDep) : [];
+      const savedWth = localStorage.getItem('apex_global_pending_withdrawals');
+      pendingWithdrawals = savedWth ? JSON.parse(savedWth) : [];
+
+      if (currentUserEmail === ADMIN_EMAIL) {
+        renderAdminPendingList();
+        renderAdminPendingWithdrawalsList();
+      }
+
+      if (currentUserEmail) {
         const balanceVal = localStorage.getItem(`apex_balance_${currentUserEmail}`);
         if (balanceVal !== null) {
           currentBalance = parseFloat(balanceVal);
           updateBalanceUI();
         }
-      }
-      if (currentUserEmail && e.key === `apex_tx_${currentUserEmail}`) {
         const savedTx = localStorage.getItem(`apex_tx_${currentUserEmail}`);
         if (savedTx) {
           transactions = JSON.parse(savedTx);
           renderTransactions();
         }
       }
-    });
+    }
+
+    function manualRefreshAdmin() {
+      syncAndRefresh();
+      alert('تم تحديث لوحة الأدمن بنجاح.');
+    }
 
     window.addEventListener('DOMContentLoaded', () => {
       const urlParams = new URLSearchParams(window.location.search);
@@ -601,6 +624,7 @@
 
     function renderTransactions() {
       const container = document.getElementById('transactions-list');
+      if (!container) return;
       if (transactions.length === 0) {
         container.innerHTML = `<p class="text-center text-xs text-gray-500 py-6">لا توجد عمليات مالية مسجلة</p>`;
         return;
@@ -657,6 +681,10 @@
           ? "flex flex-col items-center text-amber-400 text-[11px] gap-1"
           : "flex flex-col items-center text-rose-500 text-[11px] gap-1";
       }
+
+      if (tab === 'profile' && currentUserEmail === ADMIN_EMAIL) {
+        syncAndRefresh();
+      }
     }
 
     function openModal(action) {
@@ -702,7 +730,6 @@
           
           addTransaction(`طلب إيداع (${net})`, val, true, 'قيد الانتظار', reqId);
           alert('تم تقديم طلب الإيداع وهو بانتظار الاعتماد من الإدارة.');
-          if (currentUserEmail === ADMIN_EMAIL) renderAdminPendingList();
 
         } else if (currentAction === 'سحب') {
           const net = document.getElementById('withdraw-network-select').value;
@@ -729,7 +756,6 @@
 
           addTransaction(`طلب سحب (${net})`, val, false, 'قيد الانتظار', reqId);
           alert('تم تقديم طلب السحب بنجاح.');
-          if (currentUserEmail === ADMIN_EMAIL) renderAdminPendingWithdrawalsList();
         }
 
         saveUserData();
@@ -896,6 +922,7 @@
 
     function renderVipList() {
       const container = document.getElementById('vip-list');
+      if (!container) return;
       container.innerHTML = '';
 
       vipLevels.forEach(v => {
